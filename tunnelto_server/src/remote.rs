@@ -36,22 +36,17 @@ pub async fn accept_connection(socket: TcpStream) {
     let StreamWithPeekedHost {
         mut socket,
         host,
+        path,
         forwarded_for,
     } = match peek_http_request_host(socket).await {
         Some(s) => s,
         None => return,
     };
 
-    tracing::info!(%host, %forwarded_for, "new remote connection");
+    tracing::info!(%host, %path, %forwarded_for, "new remote connection");
 
-    // parse the host string and find our client
-    if CONFIG.allowed_hosts.contains(&host) {
-        error!("redirect to homepage");
-        let _ = socket.write_all(HTTP_REDIRECT_RESPONSE).await;
-        return;
-    }
-    let host = match validate_host_prefix(&host) {
-        Some(sub_domain) => sub_domain,
+    let host = match normalize_host(&host) {
+        Some(host) => host,
         None => {
             error!("invalid host specified");
             let _ = socket.write_all(HTTP_INVALID_HOST_RESPONSE).await;
@@ -59,29 +54,51 @@ pub async fn accept_connection(socket: TcpStream) {
         }
     };
 
+    if let Some(base_host) = host.strip_prefix("wormhole.") {
+        if is_allowed_host(base_host) {
+            direct_to_control(socket).await;
+            return;
+        }
+    }
+
+    if !is_allowed_host(&host) {
+        error!("invalid host specified");
+        let _ = socket.write_all(HTTP_INVALID_HOST_RESPONSE).await;
+        return;
+    }
+
+    let tunnel_id = match extract_tunnel_id(&path) {
+        Some(id) => id,
+        None => {
+            error!(%path, "missing tunnel id in path");
+            let _ = socket.write_all(HTTP_NOT_FOUND_RESPONSE).await;
+            return;
+        }
+    };
+
     // Special case -- we redirect this tcp connection to the control server
-    if host.as_str() == "wormhole" {
+    if tunnel_id == "wormhole" {
         direct_to_control(socket).await;
         return;
     }
 
     // find the client listening for this host
-    let client = match Connections::find_by_host(&host) {
+    let client = match Connections::find_by_host(&tunnel_id) {
         Some(client) => client.clone(),
         None => {
             // check other instances that may be serving this host
-            match network::instance_for_host(&host).await {
+            match network::instance_for_host(&tunnel_id).await {
                 Ok((instance, _)) => {
                     network::proxy_stream(instance, socket).await;
                     return;
                 }
                 Err(network::Error::DoesNotServeHost) => {
-                    error!(%host, "no tunnel found");
+                    error!(%tunnel_id, "no tunnel found");
                     let _ = socket.write_all(HTTP_NOT_FOUND_RESPONSE).await;
                     return;
                 }
                 Err(error) => {
-                    error!(%host, ?error, "failed to find instance");
+                    error!(%tunnel_id, ?error, "failed to find instance");
                     let _ = socket.write_all(HTTP_ERROR_LOCATING_HOST_RESPONSE).await;
                     return;
                 }
@@ -104,9 +121,10 @@ pub async fn accept_connection(socket: TcpStream) {
 
     // read from socket, write to client
     let span = observability::remote_trace("process_tcp_stream");
+    let process_tunnel_id = tunnel_id.clone();
     tokio::spawn(
         async move {
-            process_tcp_stream(active_stream, stream).await;
+            process_tcp_stream(active_stream, stream, process_tunnel_id).await;
         }
         .instrument(span),
     );
@@ -115,13 +133,13 @@ pub async fn accept_connection(socket: TcpStream) {
     let span = observability::remote_trace("tunnel_to_stream");
     tokio::spawn(
         async move {
-            tunnel_to_stream(host, stream_id, sink, queue_rx).await;
+            tunnel_to_stream(tunnel_id, stream_id, sink, queue_rx).await;
         }
         .instrument(span),
     );
 }
 
-fn validate_host_prefix(host: &str) -> Option<String> {
+fn normalize_host(host: &str) -> Option<String> {
     let url = format!("http://{}", host);
 
     let host = match url::Url::parse(&url)
@@ -135,19 +153,54 @@ fn validate_host_prefix(host: &str) -> Option<String> {
         }
     };
 
-    let domain_segments = host.split(".").collect::<Vec<&str>>();
-    let prefix = &domain_segments[0];
-    let remaining = &domain_segments[1..].join(".");
+    Some(host.to_string())
+}
 
-    if CONFIG.allowed_hosts.contains(remaining) {
-        Some(prefix.to_string())
-    } else {
-        None
+fn is_allowed_host(host: &str) -> bool {
+    CONFIG.allowed_hosts.iter().any(|allowed| allowed == host)
+}
+
+fn normalize_path(path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        if let Ok(url) = url::Url::parse(path) {
+            let mut normalized = url.path().to_string();
+            if let Some(query) = url.query() {
+                normalized.push('?');
+                normalized.push_str(query);
+            }
+            return normalized;
+        }
     }
+    path.to_string()
+}
+
+fn extract_tunnel_id(path: &str) -> Option<String> {
+    let path = normalize_path(path);
+    let trimmed = path.strip_prefix('/')?;
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut split_idx = None;
+    for (idx, ch) in trimmed.char_indices() {
+        if ch == '/' || ch == '?' {
+            split_idx = Some(idx);
+            break;
+        }
+    }
+
+    let (tunnel_id, _) = match split_idx {
+        Some(idx) => (&trimmed[..idx], &trimmed[idx..]),
+        None => (trimmed, ""),
+    };
+
+    if tunnel_id.is_empty() {
+        return None;
+    }
+    Some(tunnel_id.to_string())
 }
 
 /// Response Constants
-const HTTP_REDIRECT_RESPONSE:&'static [u8] = b"HTTP/1.1 301 Moved Permanently\r\nLocation: https://tunnelto.dev/\r\nContent-Length: 20\r\n\r\nhttps://tunnelto.dev";
 const HTTP_INVALID_HOST_RESPONSE: &'static [u8] =
     b"HTTP/1.1 400\r\nContent-Length: 23\r\n\r\nError: Invalid Hostname";
 const HTTP_NOT_FOUND_RESPONSE: &'static [u8] =
@@ -162,6 +215,7 @@ const HEALTH_CHECK_PATH: &'static [u8] = b"/0xDEADBEEF_HEALTH_CHECK";
 struct StreamWithPeekedHost {
     socket: TcpStream,
     host: String,
+    path: String,
     forwarded_for: String,
 }
 /// Filter incoming remote streams
@@ -198,8 +252,10 @@ async fn peek_http_request_host(mut socket: TcpStream) -> Option<StreamWithPeeke
         return None;
     }
 
+    let path = normalize_path(req.path.unwrap_or_default());
+
     // Handle the health check route
-    if req.path.map(|s| s.as_bytes()) == Some(HEALTH_CHECK_PATH) {
+    if path.as_bytes() == HEALTH_CHECK_PATH {
         let _ = socket.write_all(HTTP_OK_RESPONSE).await.map_err(|e| {
             error!("failed to write health_check: {:?}", e);
         });
@@ -228,11 +284,12 @@ async fn peek_http_request_host(mut socket: TcpStream) -> Option<StreamWithPeeke
         .map(|h| std::str::from_utf8(h.value))
         .next()
     {
-        tracing::info!(host=%host, path=%req.path.unwrap_or_default(), "peek request");
+        tracing::info!(host=%host, path=%path, "peek request");
 
         return Some(StreamWithPeekedHost {
             socket,
             host: host.to_string(),
+            path,
             forwarded_for,
         });
     }
@@ -243,12 +300,18 @@ async fn peek_http_request_host(mut socket: TcpStream) -> Option<StreamWithPeeke
 
 /// Process Messages from the control path in & out of the remote stream
 #[tracing::instrument(skip(tunnel_stream, tcp_stream))]
-async fn process_tcp_stream(mut tunnel_stream: ActiveStream, mut tcp_stream: ReadHalf<TcpStream>) {
+async fn process_tcp_stream(
+    mut tunnel_stream: ActiveStream,
+    mut tcp_stream: ReadHalf<TcpStream>,
+    tunnel_id: String,
+) {
     // send initial control stream init to client
     control_server::send_client_stream_init(tunnel_stream.clone()).await;
 
     // now read from stream and forward to clients
     let mut buf = [0; 1024];
+    let mut pending = Vec::new();
+    let mut body_state = BodyState::None;
 
     loop {
         // client is no longer connected
@@ -282,23 +345,216 @@ async fn process_tcp_stream(mut tunnel_stream: ActiveStream, mut tcp_stream: Rea
         }
 
         debug!("read {} bytes", n);
+        pending.extend_from_slice(&buf[..n]);
 
-        let data = &buf[..n];
-        let packet = ControlPacket::Data(tunnel_stream.id.clone(), data.to_vec());
+        loop {
+            match body_state {
+                BodyState::Unknown => {
+                    if pending.is_empty() {
+                        break;
+                    }
+                    let packet =
+                        ControlPacket::Data(tunnel_stream.id.clone(), pending.split_off(0));
+                    match tunnel_stream.client.tx.send(packet).await {
+                        Ok(_) => {
+                            debug!(client_id = %tunnel_stream.client.id, "sent data packet to client")
+                        }
+                        Err(_) => {
+                            error!(
+                                "failed to forward tcp packets to disconnected client. dropping client."
+                            );
+                            Connections::remove(&tunnel_stream.client);
+                            return;
+                        }
+                    }
+                    continue;
+                }
+                BodyState::Fixed(remaining) => {
+                    if pending.is_empty() {
+                        break;
+                    }
+                    let take = std::cmp::min(remaining, pending.len());
+                    let chunk = pending.drain(..take).collect::<Vec<u8>>();
+                    let packet = ControlPacket::Data(tunnel_stream.id.clone(), chunk);
+                    match tunnel_stream.client.tx.send(packet).await {
+                        Ok(_) => {
+                            debug!(client_id = %tunnel_stream.client.id, "sent data packet to client")
+                        }
+                        Err(_) => {
+                            error!(
+                                "failed to forward tcp packets to disconnected client. dropping client."
+                            );
+                            Connections::remove(&tunnel_stream.client);
+                            return;
+                        }
+                    }
 
-        match tunnel_stream.client.tx.send(packet.clone()).await {
-            Ok(_) => debug!(client_id = %tunnel_stream.client.id, "sent data packet to client"),
-            Err(_) => {
-                error!("failed to forward tcp packets to disconnected client. dropping client.");
-                Connections::remove(&tunnel_stream.client);
+                    let remaining = remaining - take;
+                    body_state = if remaining == 0 {
+                        BodyState::None
+                    } else {
+                        BodyState::Fixed(remaining)
+                    };
+                    if matches!(body_state, BodyState::Fixed(_)) {
+                        break;
+                    }
+                }
+                BodyState::None => {
+                    let header_end = match find_header_end(&pending) {
+                        Some(end) => end,
+                        None => break,
+                    };
+
+                    let header_bytes = &pending[..header_end];
+                    let mut headers = [httparse::EMPTY_HEADER; 64];
+                    let mut req = httparse::Request::new(&mut headers);
+                    let parsed = match req.parse(header_bytes) {
+                        Ok(status) => status,
+                        Err(error) => {
+                            error!(?error, "failed to parse request headers");
+                            let packet =
+                                ControlPacket::Data(tunnel_stream.id.clone(), pending.split_off(0));
+                            match tunnel_stream.client.tx.send(packet).await {
+                                Ok(_) => {
+                                    debug!(
+                                        client_id = %tunnel_stream.client.id,
+                                        "sent data packet to client"
+                                    )
+                                }
+                                Err(_) => {
+                                    error!(
+                                        "failed to forward tcp packets to disconnected client. dropping client."
+                                    );
+                                    Connections::remove(&tunnel_stream.client);
+                                    return;
+                                }
+                            }
+                            break;
+                        }
+                    };
+
+                    if !matches!(parsed, httparse::Status::Complete(_)) {
+                        break;
+                    }
+
+                    let path = req.path.unwrap_or_default();
+                    let normalized_path = normalize_path(path);
+                    let new_path = strip_tunnel_prefix(&normalized_path, &tunnel_id);
+                    let rewritten = rewrite_request_path(header_bytes, &new_path);
+                    let is_chunked = has_chunked_body(req.headers);
+                    let content_len = content_length(req.headers).unwrap_or(0);
+
+                    let packet = ControlPacket::Data(tunnel_stream.id.clone(), rewritten);
+                    match tunnel_stream.client.tx.send(packet).await {
+                        Ok(_) => {
+                            debug!(client_id = %tunnel_stream.client.id, "sent data packet to client")
+                        }
+                        Err(_) => {
+                            error!(
+                                "failed to forward tcp packets to disconnected client. dropping client."
+                            );
+                            Connections::remove(&tunnel_stream.client);
+                            return;
+                        }
+                    }
+
+                    pending.drain(..header_end);
+
+                    if is_chunked {
+                        body_state = BodyState::Unknown;
+                    } else {
+                        body_state = if content_len == 0 {
+                            BodyState::None
+                        } else {
+                            BodyState::Fixed(content_len)
+                        };
+                    }
+                }
             }
         }
     }
 }
 
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|idx| idx + 4)
+}
+
+fn rewrite_request_path(header_bytes: &[u8], new_path: &str) -> Vec<u8> {
+    let line_end = match header_bytes
+        .windows(2)
+        .position(|window| window == b"\r\n")
+    {
+        Some(end) => end,
+        None => return header_bytes.to_vec(),
+    };
+
+    let line = &header_bytes[..line_end];
+    let first_space = match line.iter().position(|&b| b == b' ') {
+        Some(idx) => idx,
+        None => return header_bytes.to_vec(),
+    };
+    let second_space = match line[first_space + 1..].iter().position(|&b| b == b' ') {
+        Some(idx) => idx + first_space + 1,
+        None => return header_bytes.to_vec(),
+    };
+
+    let mut rewritten = Vec::with_capacity(header_bytes.len() + new_path.len());
+    rewritten.extend_from_slice(&line[..first_space + 1]);
+    rewritten.extend_from_slice(new_path.as_bytes());
+    rewritten.extend_from_slice(&line[second_space..]);
+    rewritten.extend_from_slice(b"\r\n");
+    rewritten.extend_from_slice(&header_bytes[line_end + 2..]);
+    rewritten
+}
+
+fn strip_tunnel_prefix(path: &str, tunnel_id: &str) -> String {
+    let path = normalize_path(path);
+    let prefix = format!("/{}", tunnel_id);
+
+    if path == prefix {
+        return "/".to_string();
+    }
+
+    if path.starts_with(&(prefix.clone() + "/")) {
+        return path[prefix.len()..].to_string();
+    }
+
+    if path.starts_with(&(prefix.clone() + "?")) {
+        return format!("/{}", &path[prefix.len()..]);
+    }
+
+    path
+}
+
+fn content_length(headers: &[httparse::Header]) -> Option<usize> {
+    headers
+        .iter()
+        .find(|h| h.name.eq_ignore_ascii_case("content-length"))
+        .and_then(|h| std::str::from_utf8(h.value).ok())
+        .and_then(|value| value.trim().parse::<usize>().ok())
+}
+
+fn has_chunked_body(headers: &[httparse::Header]) -> bool {
+    headers.iter().any(|h| {
+        h.name.eq_ignore_ascii_case("transfer-encoding")
+            && std::str::from_utf8(h.value)
+                .map(|v| v.to_ascii_lowercase().contains("chunked"))
+                .unwrap_or(false)
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BodyState {
+    None,
+    Fixed(usize),
+    Unknown,
+}
+
 #[tracing::instrument(skip(sink, stream_id, queue))]
 async fn tunnel_to_stream(
-    subdomain: String,
+    tunnel_id: String,
     stream_id: StreamId,
     mut sink: WriteHalf<TcpStream>,
     mut queue: UnboundedReceiver<StreamMessage>,
@@ -315,7 +571,7 @@ async fn tunnel_to_stream(
                     None
                 }
                 StreamMessage::NoClientTunnel => {
-                    tracing::info!(%subdomain, ?stream_id, "client tunnel not found");
+                    tracing::info!(%tunnel_id, ?stream_id, "client tunnel not found");
                     let _ = sink.write_all(HTTP_NOT_FOUND_RESPONSE).await;
                     None
                 }

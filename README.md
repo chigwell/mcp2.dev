@@ -22,7 +22,7 @@ CTRL_HOST="localhost" CTRL_PORT=5000 CTRL_TLS_OFF=1 cargo run --bin mcp2dev -- -
 
 # Test it out!
 # Remember 8080 is our local mcp2dev TCP server
-curl -H '<subdomain>.localhost' "http://localhost:8080/some_path?with=somequery"
+curl "http://localhost:8080/<tunnel_id>/some_path?with=somequery"
 ```
 See `tunnelto_server/src/config.rs` for the environment variables for configuration.
 

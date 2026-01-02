@@ -45,7 +45,11 @@ impl CliInterface {
             return;
         }
 
-        let public_url = self.config.activation_url(&full_hostname).bold().green();
+        let public_url = self
+            .config
+            .activation_url(&full_hostname, sub_domain)
+            .bold()
+            .green();
         let forward_url = self.config.forward_url();
         let inspect = format!("http://localhost:{}", self.introspect.port());
 

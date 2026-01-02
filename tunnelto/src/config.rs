@@ -33,7 +33,7 @@ struct Opts {
     #[structopt(short = "k", long = "key")]
     key: Option<String>,
 
-    /// Specify a sub-domain for this tunnel
+    /// Specify a tunnel id (used as the first path segment)
     #[structopt(short = "s", long = "subdomain")]
     sub_domain: Option<String>,
 
@@ -183,16 +183,11 @@ impl Config {
         })
     }
 
-    pub fn activation_url(&self, full_hostname: &str) -> String {
-        format!(
-            "{}://{}",
-            if self.control_tls_off {
-                "http"
-            } else {
-                "https"
-            },
-            full_hostname
-        )
+    pub fn activation_url(&self, host: &str, tunnel_id: &str) -> String {
+        let scheme = if self.control_tls_off { "http" } else { "https" };
+        let host = host.trim_end_matches('/');
+        let tunnel_id = tunnel_id.trim_start_matches('/');
+        format!("{}://{}/{}", scheme, host, tunnel_id)
     }
 
     pub fn forward_url(&self) -> String {
