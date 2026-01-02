@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::time::Duration;
 use tracing::{error, info};
 use tunnelto_lib::{ClientHello, ClientId, ClientType, ServerHello};
+use uuid::Uuid;
 use warp::filters::ws::{Message, WebSocket};
 
 pub struct ClientHandshake {
@@ -197,6 +198,10 @@ async fn request_tunnel_id() -> Result<String, String> {
         .await
         .map_err(|e| format!("guid response invalid: {e}"))?
         .guid;
+
+    let guid = guid.trim();
+    let parsed = Uuid::parse_str(guid).map_err(|_| "guid response invalid: not a uuid".to_string())?;
+    let guid = parsed.to_string();
 
     if !is_valid_tunnel_id(&guid) {
         return Err("guid response invalid: illegal characters".to_string());

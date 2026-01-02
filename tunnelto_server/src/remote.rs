@@ -4,6 +4,7 @@ use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tracing::debug;
 use tracing::{error, Instrument};
+use uuid::Uuid;
 
 async fn direct_to_control(mut incoming: TcpStream) {
     let mut control_socket =
@@ -75,12 +76,6 @@ pub async fn accept_connection(socket: TcpStream) {
             return;
         }
     };
-
-    // Special case -- we redirect this tcp connection to the control server
-    if tunnel_id == "wormhole" {
-        direct_to_control(socket).await;
-        return;
-    }
 
     // find the client listening for this host
     let client = match Connections::find_by_host(&tunnel_id) {
@@ -197,7 +192,9 @@ fn extract_tunnel_id(path: &str) -> Option<String> {
     if tunnel_id.is_empty() {
         return None;
     }
-    Some(tunnel_id.to_string())
+
+    let parsed = Uuid::parse_str(tunnel_id).ok()?;
+    Some(parsed.to_string())
 }
 
 /// Response Constants
