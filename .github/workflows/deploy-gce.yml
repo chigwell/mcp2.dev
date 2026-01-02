@@ -1,0 +1,88 @@
+name: Deploy Compute Engine
+
+on:
+  push:
+    branches: ["master"]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ secrets.GCP_REGION }}
+  ZONE: ${{ secrets.GCP_ZONE }}
+  VM_NAME: ${{ secrets.GCE_INSTANCE_NAME }}
+  REPOSITORY: ${{ secrets.GCP_ARTIFACT_REPO }}
+  IMAGE: tunnelto-server
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        run: |
+          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:${{ github.sha }}"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+      - name: Deploy to VM
+        env:
+          TUNNELTO_ENV_B64: ${{ secrets.TUNNELTO_ENV_B64 }}
+        run: |
+          COMMAND="set -euo pipefail; \
+          sudo mkdir -p /etc/tunnelto; \
+          echo '$TUNNELTO_ENV_B64' | base64 -d | sudo tee /etc/tunnelto/env >/dev/null; \
+          sudo docker pull '$IMAGE_URI'; \
+          sudo docker stop tunnelto_server || true; \
+          sudo docker rm tunnelto_server || true; \
+          sudo docker run -d --name tunnelto_server --restart unless-stopped \
+            --env-file /etc/tunnelto/env \
+            -p 8080:8080 -p 5000:5000 \
+            '$IMAGE_URI';"
+          gcloud compute ssh "${{ env.VM_NAME }}" \
+            --zone "${{ env.ZONE }}" \
+            --command "$COMMAND"
+
+      - name: Configure Caddy HTTPS
+        run: |
+          COMMAND="set -euo pipefail; \
+          if ! command -v caddy >/dev/null 2>&1; then \
+            sudo apt-get update; \
+            sudo apt-get install -y --no-install-recommends debian-keyring debian-archive-keyring apt-transport-https curl; \
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg; \
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null; \
+            sudo apt-get update; \
+            sudo apt-get install -y --no-install-recommends caddy; \
+          fi; \
+          printf '%s\n' \
+          'tunnel.mcp2.dev {' \
+          '  reverse_proxy 127.0.0.1:8080' \
+          '}' \
+          '' \
+          'wormhole.tunnel.mcp2.dev {' \
+          '  reverse_proxy 127.0.0.1:5000' \
+          '}' | sudo tee /etc/caddy/Caddyfile >/dev/null; \
+          sudo caddy validate --config /etc/caddy/Caddyfile; \
+          sudo systemctl reload caddy;"
+          gcloud compute ssh "${{ env.VM_NAME }}" \
+            --zone "${{ env.ZONE }}" \
+            --command "$COMMAND"
