@@ -7,11 +7,11 @@ kill_timeout = 5
 
 
 [env]
-  ALLOWED_HOSTS = "t2-svc.fly.dev,2.tunnelto.dev,t2-old.fly.dev,tunnelto.dev"
+  ALLOWED_HOSTS = "t2-svc.fly.dev,2.mcp2.dev,t2-old.fly.dev,mcp2.dev"
   NET_PORT = 10002
   BLOCKED_SUB_DOMAINS = "wormhole,dashboard,2,myapp"
   RUST_LOG="tunnelto_server=debug"
-  TUNNEL_HOST = "tunnelto.dev"
+  TUNNEL_HOST = "mcp2.dev"
 
 [experimental]
   private_network=true

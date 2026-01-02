@@ -1,16 +1,10 @@
-<p align="center" >
-<img width="540px" src="https://repository-images.githubusercontent.com/249120770/7ea6d180-b4ba-11ea-96ab-6c3b987aac9d" align="center"/>
-</p>
+<div align="center">
+  <a target="_blank" href="https://mcp2.dev/?utm_source=github&utm_medium=readme">
+   <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&height=200&section=header&text=MCP2.dev&fontSize=50&fontAlignY=35&animation=fadeIn&fontColor=FFFFFF&descAlignY=55&descAlign=62" alt="Telegram MCP Server" width="100%" />
+  </a>
+</div>
 
-<p align="center">    
-  <a href="https://github.com/agrinman/tunnelto/actions?query=workflow%3A%22Build+and+Release%22"><img src="https://github.com/agrinman/wormhole/workflows/Build%20and%20Release/badge.svg" alt="BuildRelease"></a>
-  <a href="https://crates.io/crates/wormhole-tunnel"><img src="https://img.shields.io/crates/v/tunnelto" alt="crate"></a>
-  <a href="https://github.com/agrinman/tunnelto/packages/295195"><img src="https://img.shields.io/docker/v/agrinman/wormhole?label=Docker" alt="GitHub Docker Registry"></a> 
-  <a href="https://twitter.com/alexgrinman"><img src="https://img.shields.io/twitter/follow/alexgrinman?label=%40AlexGrinman" alt="crate"></a>
-</p>
-
-# `tunnelto`
-`tunnelto` lets you expose your locally running web server via a public URL.
+`mcp2.dev` lets you expose your locally running web server via a public URL.
 Written in Rust. Built completely with async-io on top of tokio.
 
 1. [Install](#install)
@@ -20,30 +14,30 @@ Written in Rust. Built completely with async-io on top of tokio.
 # Install
 ## Brew (macOS)
 ```bash
-brew install agrinman/tap/tunnelto
+brew install chigwell/tap/mcp2dev
 ```
 
 ## Cargo
 ```bash
-cargo install tunnelto
+cargo install mcp2dev
 ```
 
 ## Everywhere
-Or **Download a release for your target OS here**: [tunnelto/releases](https://github.com/agrinman/tunnelto/releases)
+Or **Download a release for your target OS here**: [mcp2dev/releases](https://github.com/chigwell/mcp2.dev/releases)
 
 # Usage
 ## Quick Start
 ```shell script
-tunnelto --port 8000
+mcp2dev --port 8000
 ```
 The above command opens a tunnel and forwards traffic to `localhost:8000`.
 
 ## More Options:
 ```shell script
-tunnelto 0.1.14
+mcp2dev 0.1.14
 
 USAGE:
-    tunnelto [FLAGS] [OPTIONS] [SUBCOMMAND]
+    mcp2dev [FLAGS] [OPTIONS] [SUBCOMMAND]
 
 FLAGS:
     -h, --help       Prints help information
@@ -77,13 +71,13 @@ SUBCOMMANDS:
 ## Testing Locally
 ```shell script
 # Run the Server: xpects TCP traffic on 8080 and control websockets on 5000
-ALLOWED_HOSTS="localhost" cargo run --bin tunnelto_server
+ALLOWED_HOSTS="localhost" ALLOW_ANON=1 cargo run --bin tunnelto_server
 
-# Run a local tunnelto client talking to your local tunnelto_server
-CTRL_HOST="localhost" CTRL_PORT=5000 CTRL_TLS_OFF=1 cargo run --bin tunnelto -- -p 8000
+# Run a local mcp2dev client talking to your local tunnelto_server
+CTRL_HOST="localhost" CTRL_PORT=5000 CTRL_TLS_OFF=1 cargo run --bin mcp2dev -- -p 8000
 
 # Test it out!
-# Remember 8080 is our local tunnelto TCP server
+# Remember 8080 is our local mcp2dev TCP server
 curl -H '<subdomain>.localhost' "http://localhost:8080/some_path?with=somequery"
 ```
 See `tunnelto_server/src/config.rs` for the environment variables for configuration.
@@ -93,6 +87,6 @@ The implementation does not support multiple running servers (i.e. centralized c
 Therefore, if you deploy multiple instances of the server, it will only work if the client connects to the same instance
 as the remote TCP stream.
 
-The [version hosted by us](https://tunnelto.dev) is a proper distributed system running on the the fabulous [fly.io](https://fly.io) service. 
+The [version hosted by us](https://mcp2.dev) is a proper distributed system running on the the fabulous [fly.io](https://fly.io) service. 
 In short, fly.io makes this super easy with their [Private Networking](https://fly.io/docs/reference/privatenetwork/) feature.
 See `tunnelto_server/src/network/mod.rs` for the implementation details of our gossip mechanism.

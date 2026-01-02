@@ -1,15 +1,15 @@
 [package]
-name = "tunnelto"
-description = "expose your local web server to the internet with a public url"
-version = "0.1.19"
-authors = ["Alex Grinman <alex@tunnelto.dev>"]
-edition = "2018"
+name = "mcp2.dev"
+description = "expose your local mcp web server to the internet with a public url"
+version = "0.0.1"
+authors = ["Eugene Evstafev <hi@eugene.plus>"]
+edition = "2025"
 license = "MIT"
-repository = "https://github.com/agrinman/tunnelto"
+repository = "https://github.com/chigwell/mcp2.dev"
 readme = "../README.md"
 
 [[bin]]
-name = "tunnelto"
+name = "mcp2.dev"
 path = "src/main.rs"
 
 [dependencies]

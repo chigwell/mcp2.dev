@@ -14,6 +14,9 @@ pub struct Config {
     /// i.e:    dashboard.tunnelto.dev
     pub blocked_sub_domains: Vec<String>,
 
+    /// Allow anonymous tunnels (no auth key required)
+    pub allow_anonymous: bool,
+
     /// port for remote streams (end users)
     pub remote_port: u16,
 
@@ -52,6 +55,8 @@ impl Config {
             .map(|s| s.split(",").map(String::from).collect())
             .unwrap_or(vec![]);
 
+        let allow_anonymous = get_bool("ALLOW_ANON", false);
+
         let master_sig_key = if let Ok(key) = std::env::var("MASTER_SIG_KEY") {
             SigKey::from_hex(&key).expect("invalid master key: not hex or length incorrect")
         } else {
@@ -79,6 +84,7 @@ impl Config {
         Config {
             allowed_hosts,
             blocked_sub_domains,
+            allow_anonymous,
             control_port: get_port("CTRL_PORT", 5000),
             remote_port: get_port("PORT", 8080),
             internal_network_port: get_port("NET_PORT", 6000),
@@ -99,5 +105,15 @@ fn get_port(var: &'static str, default: u16) -> u16 {
         })
     } else {
         default
+    }
+}
+
+fn get_bool(var: &'static str, default: bool) -> bool {
+    match std::env::var(var) {
+        Ok(value) => matches!(
+            value.as_str(),
+            "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+        ),
+        Err(_) => default,
     }
 }

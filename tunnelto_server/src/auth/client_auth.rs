@@ -45,31 +45,43 @@ async fn auth_client(
 
     let (auth_key, client_id, requested_sub_domain) = match client_hello.client_type {
         ClientType::Anonymous => {
-            let data = serde_json::to_vec(&ServerHello::AuthFailed).unwrap_or_default();
-            let _ = websocket.send(Message::binary(data)).await;
-            return None;
+            if !CONFIG.allow_anonymous {
+                let data = serde_json::to_vec(&ServerHello::AuthFailed).unwrap_or_default();
+                let _ = websocket.send(Message::binary(data)).await;
+                return None;
+            }
 
-            // // determine the client and subdomain
-            // let (client_id, sub_domain) =
-            //     match (client_hello.reconnect_token, client_hello.sub_domain) {
-            //         (Some(token), _) => {
-            //             return handle_reconnect_token(token, websocket).await;
-            //         }
-            //         (None, Some(sd)) => (
-            //             ClientId::generate(),
-            //             ServerHello::prefixed_random_domain(&sd),
-            //         ),
-            //         (None, None) => (ClientId::generate(), ServerHello::random_domain()),
-            //     };
+            if let Some(token) = client_hello.reconnect_token {
+                return handle_reconnect_token(token, websocket).await;
+            }
 
-            // return Some((
-            //     websocket,
-            //     ClientHandshake {
-            //         id: client_id,
-            //         sub_domain,
-            //         is_anonymous: true,
-            //     },
-            // ));
+            let client_id = ClientId::generate();
+            let sub_domain = match client_hello.sub_domain {
+                Some(requested_sub_domain) => {
+                    let (ws, sub_domain) = match sanitize_sub_domain_and_pre_validate(
+                        websocket,
+                        requested_sub_domain,
+                        &client_id,
+                    )
+                    .await
+                    {
+                        Some(s) => s,
+                        None => return None,
+                    };
+                    websocket = ws;
+                    sub_domain
+                }
+                None => ServerHello::random_domain(),
+            };
+
+            return Some((
+                websocket,
+                ClientHandshake {
+                    id: client_id,
+                    sub_domain,
+                    is_anonymous: true,
+                },
+            ));
         }
         ClientType::Auth { key } => match client_hello.sub_domain {
             Some(requested_sub_domain) => {
