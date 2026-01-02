@@ -436,7 +436,26 @@ async fn process_tcp_stream(
 
                     let path = req.path.unwrap_or_default();
                     let normalized_path = normalize_path(path);
-                    let new_path = strip_tunnel_prefix(&normalized_path, &tunnel_id);
+                    let new_path = match strip_tunnel_prefix(&normalized_path, &tunnel_id) {
+                        Some(path) => path,
+                        None => {
+                            tracing::info!(
+                                %tunnel_id,
+                                %normalized_path,
+                                "missing tunnel prefix"
+                            );
+                            let _ = tunnel_stream
+                                .tx
+                                .send(StreamMessage::NoClientTunnel)
+                                .await;
+                            let _ = tunnel_stream
+                                .client
+                                .tx
+                                .send(ControlPacket::End(tunnel_stream.id.clone()))
+                                .await;
+                            return;
+                        }
+                    };
                     let rewritten = rewrite_request_path(header_bytes, &new_path);
                     let is_chunked = has_chunked_body(req.headers);
                     let content_len = content_length(req.headers).unwrap_or(0);
@@ -506,23 +525,23 @@ fn rewrite_request_path(header_bytes: &[u8], new_path: &str) -> Vec<u8> {
     rewritten
 }
 
-fn strip_tunnel_prefix(path: &str, tunnel_id: &str) -> String {
+fn strip_tunnel_prefix(path: &str, tunnel_id: &str) -> Option<String> {
     let path = normalize_path(path);
     let prefix = format!("/{}", tunnel_id);
 
     if path == prefix {
-        return "/".to_string();
+        return Some("/".to_string());
     }
 
     if path.starts_with(&(prefix.clone() + "/")) {
-        return path[prefix.len()..].to_string();
+        return Some(path[prefix.len()..].to_string());
     }
 
     if path.starts_with(&(prefix.clone() + "?")) {
-        return format!("/{}", &path[prefix.len()..]);
+        return Some(format!("/{}", &path[prefix.len()..]));
     }
 
-    path
+    None
 }
 
 fn content_length(headers: &[httparse::Header]) -> Option<usize> {
