@@ -1,12 +1,20 @@
-FROM alpine:latest
+FROM rust:1.78-bookworm AS builder
 
-COPY ./target/x86_64-unknown-linux-musl/release/tunnelto_server /tunnelto_server
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# client svc
+COPY . .
+RUN cargo build --release --bin tunnelto_server
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/release/tunnelto_server /tunnelto_server
+
 EXPOSE 8080
-# ctrl svc
-EXPOSE 5000
-# net svc
-EXPOSE 10002
-
 ENTRYPOINT ["/tunnelto_server"]
