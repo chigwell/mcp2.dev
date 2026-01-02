@@ -43,6 +43,9 @@ pub struct Config {
 
     /// The host on which we create tunnels on
     pub tunnel_host: String,
+
+    /// Endpoint used to request a new tunnel id
+    pub tunnel_id_url: String,
 }
 
 impl Config {
@@ -80,6 +83,9 @@ impl Config {
             .unwrap_or(vec![]);
 
         let tunnel_host = std::env::var("TUNNEL_HOST").unwrap_or("mcp2.dev".to_string());
+        let tunnel_id_url = std::env::var("TUNNEL_ID_URL").unwrap_or_else(|_| {
+            "https://mcp2dev-d1-api.chigwel137.workers.dev/request-guid".to_string()
+        });
 
         Config {
             allowed_hosts,
@@ -94,6 +100,7 @@ impl Config {
             instance_id,
             blocked_ips,
             tunnel_host,
+            tunnel_id_url,
         }
     }
 }

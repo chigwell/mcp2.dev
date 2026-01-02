@@ -2,7 +2,9 @@ use crate::auth::reconnect_token::ReconnectTokenPayload;
 use crate::auth::{AuthResult, AuthService};
 use crate::{ReconnectToken, CONFIG};
 use futures::{SinkExt, StreamExt};
-use tracing::error;
+use serde::Deserialize;
+use std::time::Duration;
+use tracing::{error, info};
 use tunnelto_lib::{ClientHello, ClientId, ClientType, ServerHello};
 use warp::filters::ws::{Message, WebSocket};
 
@@ -43,7 +45,7 @@ async fn auth_client(
         }
     };
 
-    let (auth_key, client_id, requested_sub_domain) = match client_hello.client_type {
+    let (auth_key, client_id, is_anonymous) = match client_hello.client_type {
         ClientType::Anonymous => {
             if !CONFIG.allow_anonymous {
                 let data = serde_json::to_vec(&ServerHello::AuthFailed).unwrap_or_default();
@@ -55,76 +57,61 @@ async fn auth_client(
                 return handle_reconnect_token(token, websocket).await;
             }
 
-            let client_id = ClientId::generate();
-            let sub_domain = match client_hello.sub_domain {
-                Some(requested_sub_domain) => {
-                    let (ws, sub_domain) = match sanitize_sub_domain_and_pre_validate(
-                        websocket,
-                        requested_sub_domain,
-                        &client_id,
-                    )
-                    .await
-                    {
-                        Some(s) => s,
-                        None => return None,
-                    };
-                    websocket = ws;
-                    sub_domain
-                }
-                None => ServerHello::random_domain(),
-            };
-
-            return Some((
-                websocket,
-                ClientHandshake {
-                    id: client_id,
-                    sub_domain,
-                    is_anonymous: true,
-                },
-            ));
+            (None, ClientId::generate(), true)
         }
-        ClientType::Auth { key } => match client_hello.sub_domain {
-            Some(requested_sub_domain) => {
-                let client_id = key.client_id();
-                let (ws, sub_domain) = match sanitize_sub_domain_and_pre_validate(
-                    websocket,
-                    requested_sub_domain,
-                    &client_id,
-                )
-                .await
-                {
-                    Some(s) => s,
-                    None => return None,
-                };
-                websocket = ws;
+        ClientType::Auth { key } => {
+            if let Some(token) = client_hello.reconnect_token {
+                return handle_reconnect_token(token, websocket).await;
+            }
 
-                (key, client_id, sub_domain)
-            }
-            None => {
-                if let Some(token) = client_hello.reconnect_token {
-                    return handle_reconnect_token(token, websocket).await;
-                } else {
-                    let sub_domain = ServerHello::random_domain();
-                    let client_id = key.client_id();
-                    (key, client_id, sub_domain)
-                }
-            }
-        },
+            let client_id = key.client_id();
+            (Some(key), client_id, false)
+        }
     };
 
-    tracing::info!(requested_sub_domain=%requested_sub_domain, "will auth sub domain");
+    let tunnel_id = match request_tunnel_id().await {
+        Ok(id) => id,
+        Err(error) => {
+            error!(?error, "failed to request tunnel id");
+            let data = serde_json::to_vec(&ServerHello::Error(error)).unwrap_or_default();
+            let _ = websocket.send(Message::binary(data)).await;
+            return None;
+        }
+    };
+
+    if is_anonymous {
+        return Some((
+            websocket,
+            ClientHandshake {
+                id: client_id,
+                sub_domain: tunnel_id,
+                is_anonymous: true,
+            },
+        ));
+    }
+
+    let auth_key = match auth_key {
+        Some(key) => key,
+        None => {
+            let data = serde_json::to_vec(&ServerHello::AuthFailed).unwrap_or_default();
+            let _ = websocket.send(Message::binary(data)).await;
+            return None;
+        }
+    };
+
+    info!(tunnel_id=%tunnel_id, "will auth tunnel id");
 
     // next authenticate the sub-domain
     let sub_domain = match crate::AUTH_DB_SERVICE
-        .auth_sub_domain(&auth_key.0, &requested_sub_domain)
+        .auth_sub_domain(&auth_key.0, &tunnel_id)
         .await
     {
-        Ok(AuthResult::Available) | Ok(AuthResult::ReservedByYou) => requested_sub_domain,
+        Ok(AuthResult::Available) | Ok(AuthResult::ReservedByYou) => tunnel_id,
         Ok(AuthResult::ReservedByYouButDelinquent) | Ok(AuthResult::PaymentRequired) => {
             // note: delinquent payments get a random suffix
-            // ServerHello::prefixed_random_domain(&requested_sub_domain)
+            // ServerHello::prefixed_random_domain(&tunnel_id)
             // TODO: create free trial domain
-            tracing::info!(requested_sub_domain=%requested_sub_domain, "payment required");
+            tracing::info!(tunnel_id=%tunnel_id, "payment required");
             let data = serde_json::to_vec(&ServerHello::AuthFailed).unwrap_or_default();
             let _ = websocket.send(Message::binary(data)).await;
             return None;
@@ -142,7 +129,7 @@ async fn auth_client(
         }
     };
 
-    tracing::info!(subdomain=%sub_domain, "did auth sub_domain");
+    tracing::info!(subdomain=%sub_domain, "did auth tunnel id");
 
     Some((
         websocket,
@@ -184,50 +171,60 @@ async fn handle_reconnect_token(
     ))
 }
 
-async fn sanitize_sub_domain_and_pre_validate(
-    mut websocket: WebSocket,
-    requested_sub_domain: String,
-    client_id: &ClientId,
-) -> Option<(WebSocket, String)> {
-    // ignore uppercase
-    let sub_domain = requested_sub_domain.to_lowercase();
+#[derive(Deserialize)]
+struct GuidResponse {
+    guid: String,
+}
 
-    if sub_domain
-        .chars()
-        .filter(|c| !(c.is_alphanumeric() || c == &'-'))
-        .count()
-        > 0
+async fn request_tunnel_id() -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&CONFIG.tunnel_id_url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|e| format!("guid request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "guid request failed: status {}",
+            response.status()
+        ));
+    }
+
+    let guid = response
+        .json::<GuidResponse>()
+        .await
+        .map_err(|e| format!("guid response invalid: {e}"))?
+        .guid;
+
+    if !is_valid_tunnel_id(&guid) {
+        return Err("guid response invalid: illegal characters".to_string());
+    }
+
+    Ok(guid)
+}
+
+fn is_valid_tunnel_id(id: &str) -> bool {
+    if id.is_empty() {
+        return false;
+    }
+
+    if id.contains('/') || id.contains('?') {
+        return false;
+    }
+
+    if CONFIG
+        .blocked_sub_domains
+        .iter()
+        .any(|blocked| blocked == id)
     {
-        error!("invalid client hello: only alphanumeric/hyphen chars allowed!");
-        let data = serde_json::to_vec(&ServerHello::InvalidSubDomain).unwrap_or_default();
-        let _ = websocket.send(Message::binary(data)).await;
-        return None;
+        return false;
     }
 
-    // ensure it's not a restricted one
-    if CONFIG.blocked_sub_domains.contains(&sub_domain) {
-        error!("invalid client hello: sub-domain restrict!");
-        let data = serde_json::to_vec(&ServerHello::SubDomainInUse).unwrap_or_default();
-        let _ = websocket.send(Message::binary(data)).await;
-        return None;
+    if id == "wormhole" {
+        return false;
     }
 
-    // ensure this sub-domain isn't taken
-    // check all instances
-    match crate::network::instance_for_host(&sub_domain).await {
-        Err(crate::network::Error::DoesNotServeHost) => {}
-        Ok((_, existing_client)) => {
-            if &existing_client != client_id {
-                error!("invalid client hello: requested sub domain in use already!");
-                let data = serde_json::to_vec(&ServerHello::SubDomainInUse).unwrap_or_default();
-                let _ = websocket.send(Message::binary(data)).await;
-                return None;
-            }
-        }
-        Err(e) => {
-            tracing::debug!("Got error checking instances: {:?}", e);
-        }
-    }
-
-    Some((websocket, sub_domain))
+    true
 }

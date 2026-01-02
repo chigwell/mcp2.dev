@@ -33,7 +33,7 @@ struct Opts {
     #[structopt(short = "k", long = "key")]
     key: Option<String>,
 
-    /// Specify a tunnel id (used as the first path segment)
+    /// Requested tunnel id (path prefix). The server may ignore this value.
     #[structopt(short = "s", long = "subdomain")]
     sub_domain: Option<String>,
 

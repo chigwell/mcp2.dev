@@ -25,13 +25,10 @@ impl CliInterface {
         if self.config.sub_domain.is_some()
             && (self.config.sub_domain.as_ref().map(|s| s.as_str()) != Some(sub_domain))
         {
-            if self.config.secret_key.is_some() {
-                Some(format!("{}",
-                          "To use custom sub-domains feature, please upgrade your billing plan at https://dashboard.tunnelto.dev.".yellow()))
-            } else {
-                Some(format!("{}",
-                          "To access the sub-domain feature, get your authentication key at https://dashboard.tunnelto.dev.".yellow()))
-            }
+            Some(format!(
+                "{}",
+                "Server assigned a tunnel id; the requested id was ignored.".yellow()
+            ))
         } else {
             None
         }
