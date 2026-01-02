@@ -79,7 +79,7 @@ impl Config {
             })
             .unwrap_or(vec![]);
 
-        let tunnel_host = std::env::var("TUNNEL_HOST").unwrap_or("tunnelto.dev".to_string());
+        let tunnel_host = std::env::var("TUNNEL_HOST").unwrap_or("mcp2.dev".to_string());
 
         Config {
             allowed_hosts,

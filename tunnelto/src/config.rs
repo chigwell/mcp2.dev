@@ -7,7 +7,7 @@ const HOST_ENV: &'static str = "CTRL_HOST";
 const PORT_ENV: &'static str = "CTRL_PORT";
 const TLS_OFF_ENV: &'static str = "CTRL_TLS_OFF";
 
-const DEFAULT_HOST: &'static str = "tunnelto.dev";
+const DEFAULT_HOST: &'static str = "mcp2.dev";
 const DEFAULT_CONTROL_HOST: &'static str = "wormhole.tunnelto.dev";
 const DEFAULT_CONTROL_PORT: &'static str = "10001";
 
@@ -17,9 +17,9 @@ const SECRET_KEY_FILE: &'static str = "key.token";
 /// Command line arguments
 #[derive(Debug, StructOpt)]
 #[structopt(
-    name = "tunnelto",
-    author = "support@tunnelto.dev",
-    about = "Expose your local web server to the internet with a public url."
+    name = "mcp2dev",
+    author = "hi@eugene.plus",
+    about = "Expose your local mcp web server to the internet with a public url."
 )]
 struct Opts {
     /// A level of verbosity, and can be used multiple times

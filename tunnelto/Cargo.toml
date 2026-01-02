@@ -1,15 +1,15 @@
 [package]
-name = "mcp2.dev"
+name = "mcp2dev"
 description = "expose your local mcp web server to the internet with a public url"
 version = "0.0.1"
 authors = ["Eugene Evstafev <hi@eugene.plus>"]
-edition = "2025"
+edition = "2018"
 license = "MIT"
 repository = "https://github.com/chigwell/mcp2.dev"
 readme = "../README.md"
 
 [[bin]]
-name = "mcp2.dev"
+name = "mcp2dev"
 path = "src/main.rs"
 
 [dependencies]

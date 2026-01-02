@@ -1,11 +1,11 @@
 [package]
 name = "tunnelto_server"
-description = "expose your local web server to the internet with a public url"
+description = "expose your local mcp web server to the internet with a public url"
 version = "0.1.10"
-authors = ["Alex Grinman <alex@tunnelto.dev>"]
+authors = ["Eugene Evstafev <hi@eugene.plus>"]
 edition = "2018"
 license = "MIT"
-repository = "https://tunnelto.dev"
+repository = "https://mcp2.dev"
 readme = "../README.md"
 
 [[bin]]
