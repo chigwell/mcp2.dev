@@ -1,7 +1,7 @@
 [package]
 name = "mcp2dev"
 description = "expose your local mcp web server to the internet with a public url"
-version = "0.0.1"
+version = "0.1.18"
 authors = ["Eugene Evstafev <hi@eugene.plus>"]
 edition = "2018"
 license = "MIT"
