@@ -76,6 +76,7 @@ async fn handle_new_connection(client_ip: IpAddr, websocket: WebSocket) {
         id: handshake.id,
         host: handshake.sub_domain,
         is_anonymous: handshake.is_anonymous,
+        auth_token: handshake.auth_token,
         tx,
     };
     Connections::add(client.clone());

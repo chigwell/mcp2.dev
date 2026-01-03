@@ -7,6 +7,7 @@ pub struct ConnectedClient {
     pub id: ClientId,
     pub host: String,
     pub is_anonymous: bool,
+    pub auth_token: Option<String>,
     pub tx: UnboundedSender<ControlPacket>,
 }
 
@@ -16,6 +17,7 @@ impl std::fmt::Debug for ConnectedClient {
             .field("id", &self.id)
             .field("sub", &self.host)
             .field("anon", &self.is_anonymous)
+            .field("auth", &self.auth_token.is_some())
             .finish()
     }
 }

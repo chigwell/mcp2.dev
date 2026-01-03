@@ -196,13 +196,18 @@ async fn connect_to_wormhole(config: &Config) -> Result<Wormhole, Error> {
         Some(secret_key) => ClientHello::generate(
             config.sub_domain.clone(),
             ClientType::Auth { key: secret_key },
+            config.tunnel_auth.clone(),
         ),
         None => {
             // if we have a reconnect token, use it.
             if let Some(reconnect) = RECONNECT_TOKEN.lock().await.clone() {
-                ClientHello::reconnect(reconnect)
+                ClientHello::reconnect(reconnect, config.tunnel_auth.clone())
             } else {
-                ClientHello::generate(config.sub_domain.clone(), ClientType::Anonymous)
+                ClientHello::generate(
+                    config.sub_domain.clone(),
+                    ClientType::Anonymous,
+                    config.tunnel_auth.clone(),
+                )
             }
         }
     };

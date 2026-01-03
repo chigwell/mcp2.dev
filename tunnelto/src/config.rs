@@ -49,6 +49,10 @@ struct Opts {
     #[structopt(short = "p", long = "port", default_value = "8000")]
     port: u16,
 
+    /// Require incoming requests to include the X-Mcp2dev-Token header with this value
+    #[structopt(short = "a", long = "tunnel-auth")]
+    tunnel_auth: Option<String>,
+
     /// Sets the address of the local introspection dashboard
     #[structopt(long = "dashboard-port")]
     dashboard_port: Option<u16>,
@@ -80,6 +84,7 @@ pub struct Config {
     pub first_run: bool,
     pub dashboard_port: u16,
     pub verbose: bool,
+    pub tunnel_auth: Option<String>,
 }
 
 impl Config {
@@ -180,6 +185,16 @@ impl Config {
             secret_key: secret_key.map(|s| SecretKey(s)),
             control_tls_off: tls_off,
             first_run: true,
+            tunnel_auth: opts
+                .tunnel_auth
+                .and_then(|value| {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                }),
         })
     }
 

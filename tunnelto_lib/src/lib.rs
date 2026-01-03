@@ -2,6 +2,8 @@ use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
+pub const TUNNEL_AUTH_HEADER: &str = "X-Mcp2dev-Token";
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(transparent)]
 pub struct SecretKey(pub String);
@@ -65,24 +67,27 @@ pub struct ClientHello {
     pub sub_domain: Option<String>,
     pub client_type: ClientType,
     pub reconnect_token: Option<ReconnectToken>,
+    pub auth_token: Option<String>,
 }
 
 impl ClientHello {
-    pub fn generate(sub_domain: Option<String>, typ: ClientType) -> Self {
+    pub fn generate(sub_domain: Option<String>, typ: ClientType, auth_token: Option<String>) -> Self {
         ClientHello {
             id: ClientId::generate(),
             client_type: typ,
             sub_domain,
             reconnect_token: None,
+            auth_token,
         }
     }
 
-    pub fn reconnect(reconnect_token: ReconnectToken) -> Self {
+    pub fn reconnect(reconnect_token: ReconnectToken, auth_token: Option<String>) -> Self {
         ClientHello {
             id: ClientId::generate(),
             sub_domain: None,
             client_type: ClientType::Anonymous,
             reconnect_token: Some(reconnect_token),
+            auth_token,
         }
     }
 }

@@ -206,6 +206,8 @@ const HTTP_ERROR_LOCATING_HOST_RESPONSE: &'static [u8] =
     b"HTTP/1.1 500\r\nContent-Length: 27\r\n\r\nError: Error finding tunnel";
 const HTTP_TUNNEL_REFUSED_RESPONSE: &'static [u8] =
     b"HTTP/1.1 500\r\nContent-Length: 32\r\n\r\nTunnel says: connection refused.";
+const HTTP_UNAUTHORIZED_RESPONSE: &'static [u8] =
+    b"HTTP/1.1 401\r\nContent-Length: 19\r\n\r\nError: Unauthorized";
 const HTTP_OK_RESPONSE: &'static [u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
 const HEALTH_CHECK_PATH: &'static [u8] = b"/0xDEADBEEF_HEALTH_CHECK";
 
@@ -456,6 +458,27 @@ async fn process_tcp_stream(
                             return;
                         }
                     };
+
+                    if let Some(expected) = tunnel_stream.client.auth_token.as_deref() {
+                        if !auth_header_matches(req.headers, expected) {
+                            tracing::info!(
+                                %tunnel_id,
+                                header = TUNNEL_AUTH_HEADER,
+                                "missing or invalid auth header"
+                            );
+                            let _ = tunnel_stream
+                                .tx
+                                .send(StreamMessage::Unauthorized)
+                                .await;
+                            let _ = tunnel_stream
+                                .client
+                                .tx
+                                .send(ControlPacket::End(tunnel_stream.id.clone()))
+                                .await;
+                            return;
+                        }
+                    }
+
                     let rewritten = rewrite_request_path(header_bytes, &new_path);
                     let is_chunked = has_chunked_body(req.headers);
                     let content_len = content_length(req.headers).unwrap_or(0);
@@ -544,6 +567,15 @@ fn strip_tunnel_prefix(path: &str, tunnel_id: &str) -> Option<String> {
     None
 }
 
+fn auth_header_matches(headers: &[httparse::Header], expected: &str) -> bool {
+    headers
+        .iter()
+        .find(|h| h.name.eq_ignore_ascii_case(TUNNEL_AUTH_HEADER))
+        .and_then(|h| std::str::from_utf8(h.value).ok())
+        .map(|value| value.trim() == expected)
+        .unwrap_or(false)
+}
+
 fn content_length(headers: &[httparse::Header]) -> Option<usize> {
     headers
         .iter()
@@ -589,6 +621,11 @@ async fn tunnel_to_stream(
                 StreamMessage::NoClientTunnel => {
                     tracing::info!(%tunnel_id, ?stream_id, "client tunnel not found");
                     let _ = sink.write_all(HTTP_NOT_FOUND_RESPONSE).await;
+                    None
+                }
+                StreamMessage::Unauthorized => {
+                    tracing::info!(%tunnel_id, ?stream_id, "missing auth header");
+                    let _ = sink.write_all(HTTP_UNAUTHORIZED_RESPONSE).await;
                     None
                 }
             }

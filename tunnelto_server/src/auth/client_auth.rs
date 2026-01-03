@@ -13,6 +13,7 @@ pub struct ClientHandshake {
     pub id: ClientId,
     pub sub_domain: String,
     pub is_anonymous: bool,
+    pub auth_token: Option<String>,
 }
 
 #[tracing::instrument(skip(websocket))]
@@ -46,6 +47,15 @@ async fn auth_client(
         }
     };
 
+    let auth_token = client_hello.auth_token.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+
     let (auth_key, client_id, is_anonymous) = match client_hello.client_type {
         ClientType::Anonymous => {
             if !CONFIG.allow_anonymous {
@@ -55,14 +65,14 @@ async fn auth_client(
             }
 
             if let Some(token) = client_hello.reconnect_token {
-                return handle_reconnect_token(token, websocket).await;
+                return handle_reconnect_token(token, auth_token, websocket).await;
             }
 
             (None, ClientId::generate(), true)
         }
         ClientType::Auth { key } => {
             if let Some(token) = client_hello.reconnect_token {
-                return handle_reconnect_token(token, websocket).await;
+                return handle_reconnect_token(token, auth_token, websocket).await;
             }
 
             let client_id = key.client_id();
@@ -87,6 +97,7 @@ async fn auth_client(
                 id: client_id,
                 sub_domain: tunnel_id,
                 is_anonymous: true,
+                auth_token,
             },
         ));
     }
@@ -138,6 +149,7 @@ async fn auth_client(
             id: client_id,
             sub_domain,
             is_anonymous: false,
+            auth_token,
         },
     ))
 }
@@ -145,6 +157,7 @@ async fn auth_client(
 #[tracing::instrument(skip(token, websocket))]
 async fn handle_reconnect_token(
     token: ReconnectToken,
+    auth_token: Option<String>,
     mut websocket: WebSocket,
 ) -> Option<(WebSocket, ClientHandshake)> {
     let payload = match ReconnectTokenPayload::verify(token, &CONFIG.master_sig_key) {
@@ -168,6 +181,7 @@ async fn handle_reconnect_token(
             id: payload.client_id,
             sub_domain: payload.sub_domain,
             is_anonymous: true,
+            auth_token,
         },
     ))
 }

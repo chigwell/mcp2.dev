@@ -5,6 +5,7 @@ use cli_table::format::Padding;
 use cli_table::{format::Justify, print_stderr, Cell, Table};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use tunnelto_lib::TUNNEL_AUTH_HEADER;
 
 pub struct CliInterface {
     spinner: ProgressBar,
@@ -50,7 +51,7 @@ impl CliInterface {
         let forward_url = self.config.forward_url();
         let inspect = format!("http://localhost:{}", self.introspect.port());
 
-        let table = vec![
+        let mut table = vec![
             vec![
                 "Public tunnel URL".green().cell(),
                 public_url
@@ -75,6 +76,20 @@ impl CliInterface {
                     .justify(Justify::Left),
             ],
         ];
+
+        if let Some(token) = &self.config.tunnel_auth {
+            table.insert(
+                1,
+                vec![
+                    "Auth header required".yellow().cell(),
+                    format!("{}: {}", TUNNEL_AUTH_HEADER, token)
+                        .yellow()
+                        .cell()
+                        .padding(Padding::builder().left(4).build())
+                        .justify(Justify::Left),
+                ],
+            );
+        }
 
         let table = table.table();
         print_stderr(table).expect("failed to generate starting terminal user interface");

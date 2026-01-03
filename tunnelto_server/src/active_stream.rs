@@ -27,4 +27,5 @@ pub enum StreamMessage {
     Data(Vec<u8>),
     TunnelRefused,
     NoClientTunnel,
+    Unauthorized,
 }
