@@ -7,6 +7,26 @@
 `mcp2.dev` lets you expose your locally running web server via a public URL.
 Written in Rust. Built completely with async-io on top of tokio.
 
+# Usage
+
+```commandline
+# Install the mcp2dev client
+cargo install --git https://github.com/chigwell/mcp2.dev mcp2dev
+
+# Expose local port 3000 via the public mcp2.dev server
+CTRL_HOST=wormhole.tunnel.mcp2.dev CTRL_PORT=443 mcp2dev -p 3000
+
+
+# Output will be something like:
+# +-------------------------+----------------------------------------------------------------------+
+# | Public tunnel URL       |     https://tunnel.mcp2.dev/8dc6369c-e4ec-4efe-a1d2-4ba4e4b25576     |
+# +-------------------------+----------------------------------------------------------------------+
+# | Local inspect dashboard |     http://localhost:51230                                           |
+# +-------------------------+----------------------------------------------------------------------+
+# | Forwarding traffic to   |     http://localhost:3000                                            |
+# +-------------------------+----------------------------------------------------------------------+
+```
+
 # Host it yourself
 1. Compile the server for the musl target. See the `musl_build.sh` for a way to do this trivially with Docker!
 2. See `Dockerfile` for a simple alpine based image that runs that server binary.
@@ -14,6 +34,7 @@ Written in Rust. Built completely with async-io on top of tokio.
 
 ## Testing Locally
 ```shell script
+
 # Run the Server: xpects TCP traffic on 8080 and control websockets on 5000
 ALLOWED_HOSTS="localhost" ALLOW_ANON=1 cargo run --bin tunnelto_server
 
