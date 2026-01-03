@@ -16,6 +16,12 @@ cargo install --git https://github.com/chigwell/mcp2.dev mcp2dev
 # Expose local port 3000 via the public mcp2.dev server
 CTRL_HOST=wormhole.tunnel.mcp2.dev CTRL_PORT=443 mcp2dev -p 3000
 
+# Require an auth header for this tunnel
+CTRL_HOST=wormhole.tunnel.mcp2.dev CTRL_PORT=443 mcp2dev -p 3000 --tunnel-auth "my-secret-token"
+
+# Requests must include the header
+curl -H 'X-Mcp2dev-Token: my-secret-token' "https://tunnel.mcp2.dev/<tunnel_id>/mcp"
+
 
 # Output will be something like:
 # +-------------------------+----------------------------------------------------------------------+
